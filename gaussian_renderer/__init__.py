@@ -33,6 +33,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
 
+    extra_args = {}
+    if "antialiasing" in getattr(GaussianRasterizationSettings, "_fields", ()):
+        extra_args["antialiasing"] = pipe.antialiasing
+
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
@@ -46,7 +50,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipe.debug,
-        antialiasing=pipe.antialiasing
+        **extra_args
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -88,7 +92,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     if separate_sh:
-        rendered_image, radii, depth_image = rasterizer(
+        raster_out = rasterizer(
             means3D = means3D,
             means2D = means2D,
             dc = dc,
@@ -99,7 +103,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             rotations = rotations,
             cov3D_precomp = cov3D_precomp)
     else:
-        rendered_image, radii, depth_image = rasterizer(
+        raster_out = rasterizer(
             means3D = means3D,
             means2D = means2D,
             shs = shs,
@@ -108,6 +112,17 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             scales = scales,
             rotations = rotations,
             cov3D_precomp = cov3D_precomp)
+
+    if isinstance(raster_out, tuple):
+        if len(raster_out) == 4:
+            rendered_image, radii, depth_image, _ = raster_out
+        elif len(raster_out) == 3:
+            rendered_image, radii, depth_image = raster_out
+        else:
+            rendered_image, radii = raster_out[:2]
+            depth_image = None
+    else:
+        rendered_image, radii, depth_image = raster_out, None, None
         
     # Apply exposure to rendered image (training only)
     if use_trained_exp:
